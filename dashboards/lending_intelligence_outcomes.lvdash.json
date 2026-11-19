@@ -1,0 +1,1521 @@
+{
+ "datasets": [
+  {
+   "name": "ds_e03f8d43",
+   "displayName": "Value bridge",
+   "queryLines": [
+    "SELECT round(100*auto_decision_rate_before,1) auto_before, round(100*auto_decision_rate_after,1) auto_after,\n",
+    "  round(median_decision_minutes_before/60,1) median_hours_before, round(median_decision_minutes_after,1) median_minutes_after,\n",
+    "  round(100*pull_through_lift_did,1) pull_through_lift_pts, round(100*epd_change_did,2) epd_change_pts,\n",
+    "  round((value_pull_through_nii+value_underwriter_capacity+value_epd_losses_avoided+value_declines_recovered_nii)*scale_to_reference_cu/1e6,2) value_ref_cu_mm,\n",
+    "  round((value_pull_through_nii+value_underwriter_capacity+value_epd_losses_avoided+value_declines_recovered_nii)/1e6,2) value_pilot_mm,\n",
+    "  extra_funded_loans_yr, underwriter_hours_saved_yr, declines_recovered_yr\n",
+    "FROM demo_dnb_catalog.ml_lend_semantic.v_value_bridge"
+   ]
+  },
+  {
+   "name": "ds_ddfde2d8",
+   "displayName": "Value components (reference CU)",
+   "queryLines": [
+    "SELECT * FROM (SELECT stack(4,\n",
+    "  '1 \u00b7 Faster decisions \u2192 more funded loans', round(CAST(value_pull_through_nii AS DOUBLE)*scale_to_reference_cu),\n",
+    "  '2 \u00b7 Underwriter capacity released', round(CAST(value_underwriter_capacity AS DOUBLE)*scale_to_reference_cu),\n",
+    "  '3 \u00b7 Early-default losses avoided (AI income check)', round(CAST(value_epd_losses_avoided AS DOUBLE)*scale_to_reference_cu),\n",
+    "  '4 \u00b7 Declines turned into funded loans', round(CAST(value_declines_recovered_nii AS DOUBLE)*scale_to_reference_cu)) AS (value_lever, annual_value_usd)\n",
+    "FROM demo_dnb_catalog.ml_lend_semantic.v_value_bridge)"
+   ]
+  },
+  {
+   "name": "ds_267fb3dd",
+   "displayName": "Pilot vs control",
+   "queryLines": [
+    "SELECT cohort, period, MEASURE(applications) applications, round(100*MEASURE(approval_rate),1) approval_rate_pct,\n",
+    "  round(100*MEASURE(pull_through_rate),1) pull_through_pct, round(MEASURE(funded_amount)/1e6,1) funded_mm\n",
+    "FROM demo_dnb_catalog.ml_lend_semantic.mv_loan_funnel GROUP BY ALL ORDER BY cohort DESC, period DESC"
+   ]
+  },
+  {
+   "name": "ds_e7b6bebf",
+   "displayName": "Pilot vs control speed",
+   "queryLines": [
+    "SELECT cohort, period, round(100*MEASURE(auto_decision_rate),1) auto_decision_pct,\n",
+    "  MEASURE(median_decision_minutes) median_minutes, round(100*MEASURE(decided_within_24h_rate),1) within_24h_pct\n",
+    "FROM demo_dnb_catalog.ml_lend_semantic.mv_decision_speed GROUP BY ALL ORDER BY cohort DESC, period DESC"
+   ]
+  },
+  {
+   "name": "ds_a69d2fb8",
+   "displayName": "Monthly pull-through",
+   "queryLines": [
+    "SELECT submitted_month, cohort, round(100*MEASURE(pull_through_rate),1) pull_through_pct\n",
+    "FROM demo_dnb_catalog.ml_lend_semantic.mv_loan_funnel WHERE submitted_month < '2026-11-01' GROUP BY ALL"
+   ]
+  },
+  {
+   "name": "ds_0ee69d9b",
+   "displayName": "Monthly median decision time",
+   "queryLines": [
+    "SELECT submitted_month, cohort, round(MEASURE(median_decision_minutes)/60,2) median_hours,\n",
+    "  round(100*MEASURE(auto_decision_rate),1) auto_decision_pct FROM demo_dnb_catalog.ml_lend_semantic.mv_decision_speed GROUP BY ALL"
+   ]
+  },
+  {
+   "name": "ds_0807e26b",
+   "displayName": "24-hour cliff",
+   "queryLines": [
+    "SELECT CASE WHEN decision_minutes <= 60 THEN '1 \u00b7 under 1 hour' WHEN decision_minutes <= 240 THEN '2 \u00b7 1-4 hours'\n",
+    "  WHEN decision_minutes <= 1440 THEN '3 \u00b7 4-24 hours' ELSE '4 \u00b7 over 24 hours' END decision_time,\n",
+    "  round(100*avg(CASE WHEN is_funded THEN 1.0 ELSE 0 END),1) pull_through_pct, count(*) approved\n",
+    "FROM demo_dnb_catalog.ml_lend_gold.fact_application WHERE is_approved GROUP BY 1"
+   ]
+  },
+  {
+   "name": "ds_35f4f63e",
+   "displayName": "Decision engine mix (pilot)",
+   "queryLines": [
+    "SELECT submitted_month, decision_engine, MEASURE(decided_applications) decisions\n",
+    "FROM demo_dnb_catalog.ml_lend_semantic.mv_decision_speed WHERE cohort = 'PILOT' GROUP BY ALL"
+   ]
+  },
+  {
+   "name": "ds_807a3c3e",
+   "displayName": "Channel lift (pilot)",
+   "queryLines": [
+    "SELECT channel, period, round(100*MEASURE(pull_through_rate),1) pull_through_pct\n",
+    "FROM demo_dnb_catalog.ml_lend_semantic.mv_loan_funnel WHERE cohort = 'PILOT' GROUP BY ALL"
+   ]
+  },
+  {
+   "name": "ds_55fd8fef",
+   "displayName": "EPD by cohort",
+   "queryLines": [
+    "SELECT concat(cohort, ' \u00b7 ', period) cohort_period, cohort, period, round(100*MEASURE(epd_rate),2) epd_pct, MEASURE(seasoned_loans) seasoned\n",
+    "FROM demo_dnb_catalog.ml_lend_semantic.mv_portfolio_risk GROUP BY ALL"
+   ]
+  },
+  {
+   "name": "ds_14fbc8e9",
+   "displayName": "AI income verification",
+   "queryLines": [
+    "SELECT date_trunc('WEEK', submitted_ts) week, count(*) documents_verified,\n",
+    "  sum(CASE WHEN ai_income_mismatch_flag THEN 1 ELSE 0 END) mismatches FROM demo_dnb_catalog.ml_lend_gold.fact_application WHERE ai_verified_monthly_income IS NOT NULL GROUP BY 1"
+   ]
+  },
+  {
+   "name": "ds_5240ecea",
+   "displayName": "Model risk bands",
+   "queryLines": [
+    "SELECT risk_band, count(*) applications, round(100*avg(epd_probability),2) avg_epd_pct FROM demo_dnb_catalog.ml_lend_ml.application_risk_scores GROUP BY 1"
+   ]
+  },
+  {
+   "name": "ds_c745a717",
+   "displayName": "AI note categories",
+   "queryLines": [
+    "SELECT note_category, count(*) notes FROM demo_dnb_catalog.ml_lend_gold.member_notes_enriched WHERE note_category IS NOT NULL GROUP BY 1"
+   ]
+  },
+  {
+   "name": "ds_aeef8878",
+   "displayName": "Expectations",
+   "queryLines": [
+    "WITH exp AS (\n",
+    "  SELECT e.name expectation, e.dataset dataset, coalesce(e.passed_records,0) passed, coalesce(e.failed_records,0) failed\n",
+    "  FROM event_log('98881b13-1625-4b3d-810c-ad987acd8c9e'), LATERAL explode(from_json(details:flow_progress:data_quality:expectations,\n",
+    "       'array<struct<name:string,dataset:string,passed_records:bigint,failed_records:bigint>>')) t(e)\n",
+    "  WHERE event_type = 'flow_progress' AND details:flow_progress:data_quality:expectations IS NOT NULL)\n",
+    "SELECT expectation, sum(passed) passed_records, sum(failed) failed_records,\n",
+    "  round(100*sum(passed)/nullif(sum(passed+failed),0),3) pass_rate_pct FROM exp GROUP BY expectation"
+   ]
+  },
+  {
+   "name": "ds_b736729b",
+   "displayName": "Quarantine",
+   "queryLines": [
+    "SELECT 'applications' entity, failed_rule, count(*) records FROM demo_dnb_catalog.ml_lend_silver.applications_quarantine GROUP BY ALL\n",
+    "UNION ALL SELECT 'members', failed_rule, count(*) FROM demo_dnb_catalog.ml_lend_silver.members_quarantine GROUP BY ALL"
+   ]
+  },
+  {
+   "name": "ds_ffdc2d30",
+   "displayName": "Governed columns",
+   "queryLines": [
+    "SELECT schema_name || '.' || table_name tbl, column_name, tag_name, coalesce(tag_value,'') tag_value\n",
+    "FROM demo_dnb_catalog.information_schema.column_tags WHERE schema_name LIKE 'ml_lend%' AND (tag_name LIKE 'class.%' OR tag_name = 'tenant_isolation_key')"
+   ]
+  }
+ ],
+ "pages": [
+  {
+   "name": "pg_f1c20d86",
+   "displayName": "Executive Outcome",
+   "layout": [
+    {
+     "widget": {
+      "name": "t_06b8b43e",
+      "multilineTextboxSpec": {
+       "lines": [
+        "## MeridianLink Lending Intelligence \u00b7 Speed **and** Trust\n",
+        "PILOT credit unions (Summit Valley, Harbor Point) live since **2025-11-01** vs CONTROL (Riverside, Prairie Federal). All lifts are difference-in-differences. Synthetic data."
+       ]
+      }
+     },
+     "position": {
+      "x": 0,
+      "y": 0,
+      "width": 5,
+      "height": 2
+     }
+    },
+    {
+     "widget": {
+      "name": "t_030da5f9",
+      "multilineTextboxSpec": {
+       "lines": [
+        "###### [Ask Genie \u2192](https://fevm-demo-dnb.cloud.databricks.com/genie/rooms/01f1e3d666d91574bd4ffb20588c2ed6)  \n",
+        "###### [Lakeflow pipeline \u2192](https://fevm-demo-dnb.cloud.databricks.com/pipelines/98881b13-1625-4b3d-810c-ad987acd8c9e)"
+       ]
+      }
+     },
+     "position": {
+      "x": 5,
+      "y": 0,
+      "width": 1,
+      "height": 2
+     }
+    },
+    {
+     "widget": {
+      "name": "c_4c56ab5c",
+      "queries": [
+       {
+        "name": "main_query",
+        "query": {
+         "datasetName": "ds_e03f8d43",
+         "fields": [
+          {
+           "name": "auto_after",
+           "expression": "`auto_after`"
+          }
+         ],
+         "disaggregated": true
+        }
+       }
+      ],
+      "spec": {
+       "version": 2,
+       "widgetType": "counter",
+       "encodings": {
+        "value": {
+         "fieldName": "auto_after",
+         "displayName": "Auto-decision rate after (%)"
+        }
+       },
+       "frame": {
+        "showTitle": true,
+        "title": "Auto-decision rate after (%)"
+       }
+      }
+     },
+     "position": {
+      "x": 0,
+      "y": 2,
+      "width": 1,
+      "height": 3
+     }
+    },
+    {
+     "widget": {
+      "name": "c_8989c311",
+      "queries": [
+       {
+        "name": "main_query",
+        "query": {
+         "datasetName": "ds_e03f8d43",
+         "fields": [
+          {
+           "name": "median_minutes_after",
+           "expression": "`median_minutes_after`"
+          }
+         ],
+         "disaggregated": true
+        }
+       }
+      ],
+      "spec": {
+       "version": 2,
+       "widgetType": "counter",
+       "encodings": {
+        "value": {
+         "fieldName": "median_minutes_after",
+         "displayName": "Median time to decision after (min)"
+        }
+       },
+       "frame": {
+        "showTitle": true,
+        "title": "Median time to decision after (min)"
+       }
+      }
+     },
+     "position": {
+      "x": 1,
+      "y": 2,
+      "width": 1,
+      "height": 3
+     }
+    },
+    {
+     "widget": {
+      "name": "c_f8c21632",
+      "queries": [
+       {
+        "name": "main_query",
+        "query": {
+         "datasetName": "ds_e03f8d43",
+         "fields": [
+          {
+           "name": "pull_through_lift_pts",
+           "expression": "`pull_through_lift_pts`"
+          }
+         ],
+         "disaggregated": true
+        }
+       }
+      ],
+      "spec": {
+       "version": 2,
+       "widgetType": "counter",
+       "encodings": {
+        "value": {
+         "fieldName": "pull_through_lift_pts",
+         "displayName": "Pull-through lift vs control (pts)"
+        }
+       },
+       "frame": {
+        "showTitle": true,
+        "title": "Pull-through lift vs control (pts)"
+       }
+      }
+     },
+     "position": {
+      "x": 2,
+      "y": 2,
+      "width": 1,
+      "height": 3
+     }
+    },
+    {
+     "widget": {
+      "name": "c_12c3be05",
+      "queries": [
+       {
+        "name": "main_query",
+        "query": {
+         "datasetName": "ds_e03f8d43",
+         "fields": [
+          {
+           "name": "epd_change_pts",
+           "expression": "`epd_change_pts`"
+          }
+         ],
+         "disaggregated": true
+        }
+       }
+      ],
+      "spec": {
+       "version": 2,
+       "widgetType": "counter",
+       "encodings": {
+        "value": {
+         "fieldName": "epd_change_pts",
+         "displayName": "Early-default change vs control (pts)"
+        }
+       },
+       "frame": {
+        "showTitle": true,
+        "title": "Early-default change vs control (pts)"
+       }
+      }
+     },
+     "position": {
+      "x": 3,
+      "y": 2,
+      "width": 1,
+      "height": 3
+     }
+    },
+    {
+     "widget": {
+      "name": "c_17284dee",
+      "queries": [
+       {
+        "name": "main_query",
+        "query": {
+         "datasetName": "ds_e03f8d43",
+         "fields": [
+          {
+           "name": "value_ref_cu_mm",
+           "expression": "`value_ref_cu_mm`"
+          }
+         ],
+         "disaggregated": true
+        }
+       }
+      ],
+      "spec": {
+       "version": 2,
+       "widgetType": "counter",
+       "encodings": {
+        "value": {
+         "fieldName": "value_ref_cu_mm",
+         "displayName": "Annual value per 40K-app CU ($M)"
+        }
+       },
+       "frame": {
+        "showTitle": true,
+        "title": "Annual value per 40K-app CU ($M)"
+       }
+      }
+     },
+     "position": {
+      "x": 4,
+      "y": 2,
+      "width": 1,
+      "height": 3
+     }
+    },
+    {
+     "widget": {
+      "name": "c_fc904bf7",
+      "queries": [
+       {
+        "name": "main_query",
+        "query": {
+         "datasetName": "ds_e03f8d43",
+         "fields": [
+          {
+           "name": "value_pilot_mm",
+           "expression": "`value_pilot_mm`"
+          }
+         ],
+         "disaggregated": true
+        }
+       }
+      ],
+      "spec": {
+       "version": 2,
+       "widgetType": "counter",
+       "encodings": {
+        "value": {
+         "fieldName": "value_pilot_mm",
+         "displayName": "Annual value, pilot CUs ($M)"
+        }
+       },
+       "frame": {
+        "showTitle": true,
+        "title": "Annual value, pilot CUs ($M)"
+       }
+      }
+     },
+     "position": {
+      "x": 5,
+      "y": 2,
+      "width": 1,
+      "height": 3
+     }
+    },
+    {
+     "widget": {
+      "name": "b_44ca9f5a",
+      "queries": [
+       {
+        "name": "main_query",
+        "query": {
+         "datasetName": "ds_ddfde2d8",
+         "fields": [
+          {
+           "name": "value_lever",
+           "expression": "`value_lever`"
+          },
+          {
+           "name": "annual_value_usd",
+           "expression": "`annual_value_usd`"
+          }
+         ],
+         "disaggregated": true
+        }
+       }
+      ],
+      "spec": {
+       "version": 3,
+       "widgetType": "bar",
+       "encodings": {
+        "y": {
+         "fieldName": "value_lever",
+         "scale": {
+          "type": "categorical",
+          "sort": {
+           "by": "natural-order"
+          }
+         },
+         "displayName": "Lever"
+        },
+        "x": {
+         "fieldName": "annual_value_usd",
+         "scale": {
+          "type": "quantitative"
+         },
+         "displayName": "USD / year"
+        },
+        "label": {
+         "show": true
+        }
+       },
+       "frame": {
+        "showTitle": true,
+        "title": "Where the value comes from (reference 40K-app credit union, USD / year)"
+       },
+       "mark": {
+        "colors": [
+         "#0061A4"
+        ]
+       }
+      }
+     },
+     "position": {
+      "x": 0,
+      "y": 5,
+      "width": 3,
+      "height": 6
+     }
+    },
+    {
+     "widget": {
+      "name": "l_458e17bd",
+      "queries": [
+       {
+        "name": "main_query",
+        "query": {
+         "datasetName": "ds_a69d2fb8",
+         "fields": [
+          {
+           "name": "submitted_month",
+           "expression": "`submitted_month`"
+          },
+          {
+           "name": "pull_through_pct",
+           "expression": "`pull_through_pct`"
+          },
+          {
+           "name": "cohort",
+           "expression": "`cohort`"
+          }
+         ],
+         "disaggregated": true
+        }
+       }
+      ],
+      "spec": {
+       "version": 3,
+       "widgetType": "line",
+       "encodings": {
+        "x": {
+         "fieldName": "submitted_month",
+         "scale": {
+          "type": "temporal"
+         },
+         "displayName": "Month"
+        },
+        "y": {
+         "fieldName": "pull_through_pct",
+         "scale": {
+          "type": "quantitative"
+         },
+         "displayName": "Pull-through %"
+        },
+        "color": {
+         "fieldName": "cohort",
+         "scale": {
+          "type": "categorical",
+          "mappings": [
+           {
+            "value": "PILOT",
+            "color": "#0061A4"
+           },
+           {
+            "value": "CONTROL",
+            "color": "#727D82"
+           }
+          ]
+         },
+         "displayName": "cohort"
+        }
+       },
+       "frame": {
+        "showTitle": true,
+        "title": "Pull-through by month: pilot vs control (go-live Nov-2025)"
+       }
+      }
+     },
+     "position": {
+      "x": 3,
+      "y": 5,
+      "width": 3,
+      "height": 6
+     }
+    },
+    {
+     "widget": {
+      "name": "tb_68319720",
+      "queries": [
+       {
+        "name": "main_query",
+        "query": {
+         "datasetName": "ds_267fb3dd",
+         "fields": [
+          {
+           "name": "cohort",
+           "expression": "`cohort`"
+          },
+          {
+           "name": "period",
+           "expression": "`period`"
+          },
+          {
+           "name": "applications",
+           "expression": "`applications`"
+          },
+          {
+           "name": "approval_rate_pct",
+           "expression": "`approval_rate_pct`"
+          },
+          {
+           "name": "pull_through_pct",
+           "expression": "`pull_through_pct`"
+          },
+          {
+           "name": "funded_mm",
+           "expression": "`funded_mm`"
+          }
+         ],
+         "disaggregated": true
+        }
+       }
+      ],
+      "spec": {
+       "version": 2,
+       "widgetType": "table",
+       "encodings": {
+        "columns": [
+         {
+          "fieldName": "cohort",
+          "displayName": "Cohort"
+         },
+         {
+          "fieldName": "period",
+          "displayName": "Period"
+         },
+         {
+          "fieldName": "applications",
+          "displayName": "Applications"
+         },
+         {
+          "fieldName": "approval_rate_pct",
+          "displayName": "Approval %"
+         },
+         {
+          "fieldName": "pull_through_pct",
+          "displayName": "Pull-through %"
+         },
+         {
+          "fieldName": "funded_mm",
+          "displayName": "Funded $M"
+         }
+        ]
+       },
+       "frame": {
+        "showTitle": true,
+        "title": "Funnel: the four cells of the experiment"
+       }
+      }
+     },
+     "position": {
+      "x": 0,
+      "y": 11,
+      "width": 3,
+      "height": 5
+     }
+    },
+    {
+     "widget": {
+      "name": "tb_5f3b4ac9",
+      "queries": [
+       {
+        "name": "main_query",
+        "query": {
+         "datasetName": "ds_e7b6bebf",
+         "fields": [
+          {
+           "name": "cohort",
+           "expression": "`cohort`"
+          },
+          {
+           "name": "period",
+           "expression": "`period`"
+          },
+          {
+           "name": "auto_decision_pct",
+           "expression": "`auto_decision_pct`"
+          },
+          {
+           "name": "median_minutes",
+           "expression": "`median_minutes`"
+          },
+          {
+           "name": "within_24h_pct",
+           "expression": "`within_24h_pct`"
+          }
+         ],
+         "disaggregated": true
+        }
+       }
+      ],
+      "spec": {
+       "version": 2,
+       "widgetType": "table",
+       "encodings": {
+        "columns": [
+         {
+          "fieldName": "cohort",
+          "displayName": "Cohort"
+         },
+         {
+          "fieldName": "period",
+          "displayName": "Period"
+         },
+         {
+          "fieldName": "auto_decision_pct",
+          "displayName": "Auto-decision %"
+         },
+         {
+          "fieldName": "median_minutes",
+          "displayName": "Median minutes"
+         },
+         {
+          "fieldName": "within_24h_pct",
+          "displayName": "Decided < 24h %"
+         }
+        ]
+       },
+       "frame": {
+        "showTitle": true,
+        "title": "Speed: the four cells of the experiment"
+       }
+      }
+     },
+     "position": {
+      "x": 3,
+      "y": 11,
+      "width": 3,
+      "height": 5
+     }
+    }
+   ],
+   "pageType": "PAGE_TYPE_CANVAS"
+  },
+  {
+   "name": "pg_8b820fbf",
+   "displayName": "Funnel & Speed",
+   "layout": [
+    {
+     "widget": {
+      "name": "t_ef1f578e",
+      "multilineTextboxSpec": {
+       "lines": [
+        "### The 24-hour cliff: every hour of waiting costs funded loans"
+       ]
+      }
+     },
+     "position": {
+      "x": 0,
+      "y": 0,
+      "width": 6,
+      "height": 1
+     }
+    },
+    {
+     "widget": {
+      "name": "b_ec4da5c4",
+      "queries": [
+       {
+        "name": "main_query",
+        "query": {
+         "datasetName": "ds_0807e26b",
+         "fields": [
+          {
+           "name": "decision_time",
+           "expression": "`decision_time`"
+          },
+          {
+           "name": "pull_through_pct",
+           "expression": "`pull_through_pct`"
+          }
+         ],
+         "disaggregated": true
+        }
+       }
+      ],
+      "spec": {
+       "version": 3,
+       "widgetType": "bar",
+       "encodings": {
+        "x": {
+         "fieldName": "decision_time",
+         "scale": {
+          "type": "categorical",
+          "sort": {
+           "by": "natural-order"
+          }
+         },
+         "displayName": "Time to decision"
+        },
+        "y": {
+         "fieldName": "pull_through_pct",
+         "scale": {
+          "type": "quantitative"
+         },
+         "displayName": "Pull-through %"
+        },
+        "label": {
+         "show": true
+        }
+       },
+       "frame": {
+        "showTitle": true,
+        "title": "Pull-through by time to decision (all approved applications)"
+       },
+       "mark": {
+        "colors": [
+         "#004268"
+        ]
+       }
+      }
+     },
+     "position": {
+      "x": 0,
+      "y": 1,
+      "width": 3,
+      "height": 6
+     }
+    },
+    {
+     "widget": {
+      "name": "l_9befdaa0",
+      "queries": [
+       {
+        "name": "main_query",
+        "query": {
+         "datasetName": "ds_0ee69d9b",
+         "fields": [
+          {
+           "name": "submitted_month",
+           "expression": "`submitted_month`"
+          },
+          {
+           "name": "median_hours",
+           "expression": "`median_hours`"
+          },
+          {
+           "name": "cohort",
+           "expression": "`cohort`"
+          }
+         ],
+         "disaggregated": true
+        }
+       }
+      ],
+      "spec": {
+       "version": 3,
+       "widgetType": "line",
+       "encodings": {
+        "x": {
+         "fieldName": "submitted_month",
+         "scale": {
+          "type": "temporal"
+         },
+         "displayName": "Month"
+        },
+        "y": {
+         "fieldName": "median_hours",
+         "scale": {
+          "type": "quantitative"
+         },
+         "displayName": "Median hours"
+        },
+        "color": {
+         "fieldName": "cohort",
+         "scale": {
+          "type": "categorical",
+          "mappings": [
+           {
+            "value": "PILOT",
+            "color": "#0061A4"
+           },
+           {
+            "value": "CONTROL",
+            "color": "#727D82"
+           }
+          ]
+         },
+         "displayName": "cohort"
+        }
+       },
+       "frame": {
+        "showTitle": true,
+        "title": "Median time to decision (hours) by month"
+       }
+      }
+     },
+     "position": {
+      "x": 3,
+      "y": 1,
+      "width": 3,
+      "height": 6
+     }
+    },
+    {
+     "widget": {
+      "name": "b_6f10d1b8",
+      "queries": [
+       {
+        "name": "main_query",
+        "query": {
+         "datasetName": "ds_35f4f63e",
+         "fields": [
+          {
+           "name": "submitted_month",
+           "expression": "`submitted_month`"
+          },
+          {
+           "name": "decisions",
+           "expression": "`decisions`"
+          },
+          {
+           "name": "decision_engine",
+           "expression": "`decision_engine`"
+          }
+         ],
+         "disaggregated": true
+        }
+       }
+      ],
+      "spec": {
+       "version": 3,
+       "widgetType": "bar",
+       "encodings": {
+        "x": {
+         "fieldName": "submitted_month",
+         "scale": {
+          "type": "categorical",
+          "sort": {
+           "by": "natural-order"
+          }
+         },
+         "displayName": "submitted_month"
+        },
+        "y": {
+         "fieldName": "decisions",
+         "scale": {
+          "type": "quantitative"
+         },
+         "displayName": "decisions"
+        },
+        "color": {
+         "fieldName": "decision_engine",
+         "scale": {
+          "type": "categorical",
+          "mappings": [
+           {
+            "value": "LENDING_INTELLIGENCE",
+            "color": "#6EC068"
+           },
+           {
+            "value": "LEGACY_RULES",
+            "color": "#00B9F2"
+           },
+           {
+            "value": "UNDERWRITER",
+            "color": "#15295A"
+           }
+          ]
+         },
+         "displayName": "decision_engine"
+        },
+        "label": {
+         "show": true
+        }
+       },
+       "frame": {
+        "showTitle": true,
+        "title": "Pilot decisions by engine: legacy rules \u2192 Lending Intelligence"
+       }
+      }
+     },
+     "position": {
+      "x": 0,
+      "y": 7,
+      "width": 4,
+      "height": 6
+     }
+    },
+    {
+     "widget": {
+      "name": "b_e9d3b5db",
+      "queries": [
+       {
+        "name": "main_query",
+        "query": {
+         "datasetName": "ds_807a3c3e",
+         "fields": [
+          {
+           "name": "channel",
+           "expression": "`channel`"
+          },
+          {
+           "name": "pull_through_pct",
+           "expression": "`pull_through_pct`"
+          },
+          {
+           "name": "period",
+           "expression": "`period`"
+          }
+         ],
+         "disaggregated": true
+        }
+       }
+      ],
+      "spec": {
+       "version": 3,
+       "widgetType": "bar",
+       "encodings": {
+        "x": {
+         "fieldName": "channel",
+         "scale": {
+          "type": "categorical",
+          "sort": {
+           "by": "natural-order"
+          }
+         },
+         "displayName": "channel"
+        },
+        "y": {
+         "fieldName": "pull_through_pct",
+         "scale": {
+          "type": "quantitative"
+         },
+         "displayName": "pull_through_pct"
+        },
+        "color": {
+         "fieldName": "period",
+         "scale": {
+          "type": "categorical",
+          "mappings": [
+           {
+            "value": "BEFORE",
+            "color": "#727D82"
+           },
+           {
+            "value": "AFTER",
+            "color": "#0061A4"
+           }
+          ]
+         },
+         "displayName": "period"
+        },
+        "label": {
+         "show": true
+        }
+       },
+       "frame": {
+        "showTitle": true,
+        "title": "Pilot pull-through by channel, before vs after"
+       },
+       "mark": {
+        "layout": "group"
+       }
+      }
+     },
+     "position": {
+      "x": 4,
+      "y": 7,
+      "width": 2,
+      "height": 6
+     }
+    }
+   ],
+   "pageType": "PAGE_TYPE_CANVAS"
+  },
+  {
+   "name": "pg_0d484123",
+   "displayName": "Risk & Trust",
+   "layout": [
+    {
+     "widget": {
+      "name": "t_deb458eb",
+      "multilineTextboxSpec": {
+       "lines": [
+        "### Trust: AI-verified income, explainable risk, governed and quality-checked data"
+       ]
+      }
+     },
+     "position": {
+      "x": 0,
+      "y": 0,
+      "width": 6,
+      "height": 1
+     }
+    },
+    {
+     "widget": {
+      "name": "b_5b290a51",
+      "queries": [
+       {
+        "name": "main_query",
+        "query": {
+         "datasetName": "ds_55fd8fef",
+         "fields": [
+          {
+           "name": "cohort_period",
+           "expression": "`cohort_period`"
+          },
+          {
+           "name": "epd_pct",
+           "expression": "`epd_pct`"
+          }
+         ],
+         "disaggregated": true
+        }
+       }
+      ],
+      "spec": {
+       "version": 3,
+       "widgetType": "bar",
+       "encodings": {
+        "x": {
+         "fieldName": "cohort_period",
+         "scale": {
+          "type": "categorical",
+          "sort": {
+           "by": "natural-order"
+          }
+         },
+         "displayName": "Cohort \u00b7 period"
+        },
+        "y": {
+         "fieldName": "epd_pct",
+         "scale": {
+          "type": "quantitative"
+         },
+         "displayName": "EPD %"
+        },
+        "label": {
+         "show": true
+        }
+       },
+       "frame": {
+        "showTitle": true,
+        "title": "Early payment default rate (60+ DPD in first 6 payments, seasoned loans)"
+       },
+       "mark": {
+        "colors": [
+         "#C62828"
+        ]
+       }
+      }
+     },
+     "position": {
+      "x": 0,
+      "y": 1,
+      "width": 2,
+      "height": 6
+     }
+    },
+    {
+     "widget": {
+      "name": "b_022ba531",
+      "queries": [
+       {
+        "name": "main_query",
+        "query": {
+         "datasetName": "ds_14fbc8e9",
+         "fields": [
+          {
+           "name": "week",
+           "expression": "`week`"
+          },
+          {
+           "name": "mismatches",
+           "expression": "`mismatches`"
+          }
+         ],
+         "disaggregated": true
+        }
+       }
+      ],
+      "spec": {
+       "version": 3,
+       "widgetType": "bar",
+       "encodings": {
+        "x": {
+         "fieldName": "week",
+         "scale": {
+          "type": "categorical",
+          "sort": {
+           "by": "natural-order"
+          }
+         },
+         "displayName": "Week"
+        },
+        "y": {
+         "fieldName": "mismatches",
+         "scale": {
+          "type": "quantitative"
+         },
+         "displayName": "Mismatches"
+        },
+        "label": {
+         "show": true
+        }
+       },
+       "frame": {
+        "showTitle": true,
+        "title": "AI pay-stub verification: stated-income mismatches caught per week"
+       },
+       "mark": {
+        "colors": [
+         "#007FA4"
+        ]
+       }
+      }
+     },
+     "position": {
+      "x": 2,
+      "y": 1,
+      "width": 2,
+      "height": 6
+     }
+    },
+    {
+     "widget": {
+      "name": "b_c12f554e",
+      "queries": [
+       {
+        "name": "main_query",
+        "query": {
+         "datasetName": "ds_5240ecea",
+         "fields": [
+          {
+           "name": "risk_band",
+           "expression": "`risk_band`"
+          },
+          {
+           "name": "applications",
+           "expression": "`applications`"
+          }
+         ],
+         "disaggregated": true
+        }
+       }
+      ],
+      "spec": {
+       "version": 3,
+       "widgetType": "bar",
+       "encodings": {
+        "x": {
+         "fieldName": "risk_band",
+         "scale": {
+          "type": "categorical",
+          "sort": {
+           "by": "natural-order"
+          }
+         },
+         "displayName": "Risk band"
+        },
+        "y": {
+         "fieldName": "applications",
+         "scale": {
+          "type": "quantitative"
+         },
+         "displayName": "Applications"
+        },
+        "label": {
+         "show": true
+        }
+       },
+       "frame": {
+        "showTitle": true,
+        "title": "EPD model risk bands (recent applications)"
+       },
+       "mark": {
+        "colors": [
+         "#0061A4"
+        ]
+       }
+      }
+     },
+     "position": {
+      "x": 4,
+      "y": 1,
+      "width": 2,
+      "height": 6
+     }
+    },
+    {
+     "widget": {
+      "name": "tb_5c039260",
+      "queries": [
+       {
+        "name": "main_query",
+        "query": {
+         "datasetName": "ds_aeef8878",
+         "fields": [
+          {
+           "name": "expectation",
+           "expression": "`expectation`"
+          },
+          {
+           "name": "passed_records",
+           "expression": "`passed_records`"
+          },
+          {
+           "name": "failed_records",
+           "expression": "`failed_records`"
+          },
+          {
+           "name": "pass_rate_pct",
+           "expression": "`pass_rate_pct`"
+          }
+         ],
+         "disaggregated": true
+        }
+       }
+      ],
+      "spec": {
+       "version": 2,
+       "widgetType": "table",
+       "encodings": {
+        "columns": [
+         {
+          "fieldName": "expectation",
+          "displayName": "Expectation"
+         },
+         {
+          "fieldName": "passed_records",
+          "displayName": "Passed"
+         },
+         {
+          "fieldName": "failed_records",
+          "displayName": "Failed"
+         },
+         {
+          "fieldName": "pass_rate_pct",
+          "displayName": "Pass %"
+         }
+        ]
+       },
+       "frame": {
+        "showTitle": true,
+        "title": "Lakeflow expectations (pipeline event log)"
+       }
+      }
+     },
+     "position": {
+      "x": 0,
+      "y": 7,
+      "width": 2,
+      "height": 6
+     }
+    },
+    {
+     "widget": {
+      "name": "tb_67792c91",
+      "queries": [
+       {
+        "name": "main_query",
+        "query": {
+         "datasetName": "ds_b736729b",
+         "fields": [
+          {
+           "name": "entity",
+           "expression": "`entity`"
+          },
+          {
+           "name": "failed_rule",
+           "expression": "`failed_rule`"
+          },
+          {
+           "name": "records",
+           "expression": "`records`"
+          }
+         ],
+         "disaggregated": true
+        }
+       }
+      ],
+      "spec": {
+       "version": 2,
+       "widgetType": "table",
+       "encodings": {
+        "columns": [
+         {
+          "fieldName": "entity",
+          "displayName": "Entity"
+         },
+         {
+          "fieldName": "failed_rule",
+          "displayName": "Rule"
+         },
+         {
+          "fieldName": "records",
+          "displayName": "Quarantined"
+         }
+        ]
+       },
+       "frame": {
+        "showTitle": true,
+        "title": "Quarantined records by rule"
+       }
+      }
+     },
+     "position": {
+      "x": 2,
+      "y": 7,
+      "width": 2,
+      "height": 6
+     }
+    },
+    {
+     "widget": {
+      "name": "p_e4531ca5",
+      "queries": [
+       {
+        "name": "main_query",
+        "query": {
+         "datasetName": "ds_c745a717",
+         "fields": [
+          {
+           "name": "notes",
+           "expression": "`notes`"
+          },
+          {
+           "name": "note_category",
+           "expression": "`note_category`"
+          }
+         ],
+         "disaggregated": true
+        }
+       }
+      ],
+      "spec": {
+       "version": 3,
+       "widgetType": "pie",
+       "encodings": {
+        "angle": {
+         "fieldName": "notes",
+         "scale": {
+          "type": "quantitative"
+         },
+         "displayName": "notes"
+        },
+        "color": {
+         "fieldName": "note_category",
+         "scale": {
+          "type": "categorical"
+         },
+         "displayName": "note_category"
+        }
+       },
+       "frame": {
+        "showTitle": true,
+        "title": "Member & officer notes by AI category (ai_classify)"
+       }
+      }
+     },
+     "position": {
+      "x": 4,
+      "y": 7,
+      "width": 2,
+      "height": 6
+     }
+    },
+    {
+     "widget": {
+      "name": "tb_ee672c5a",
+      "queries": [
+       {
+        "name": "main_query",
+        "query": {
+         "datasetName": "ds_ffdc2d30",
+         "fields": [
+          {
+           "name": "tbl",
+           "expression": "`tbl`"
+          },
+          {
+           "name": "column_name",
+           "expression": "`column_name`"
+          },
+          {
+           "name": "tag_name",
+           "expression": "`tag_name`"
+          },
+          {
+           "name": "tag_value",
+           "expression": "`tag_value`"
+          }
+         ],
+         "disaggregated": true
+        }
+       }
+      ],
+      "spec": {
+       "version": 2,
+       "widgetType": "table",
+       "encodings": {
+        "columns": [
+         {
+          "fieldName": "tbl",
+          "displayName": "Table"
+         },
+         {
+          "fieldName": "column_name",
+          "displayName": "Column"
+         },
+         {
+          "fieldName": "tag_name",
+          "displayName": "Tag"
+         },
+         {
+          "fieldName": "tag_value",
+          "displayName": "Value"
+         }
+        ]
+       },
+       "frame": {
+        "showTitle": true,
+        "title": "Columns governed by tags (Data Classification + tenant isolation \u2192 ABAC)"
+       }
+      }
+     },
+     "position": {
+      "x": 0,
+      "y": 13,
+      "width": 6,
+      "height": 6
+     }
+    }
+   ],
+   "pageType": "PAGE_TYPE_CANVAS"
+  }
+ ]
+}

@@ -1,0 +1,19 @@
+command: ["streamlit", "run", "app.py", "--server.port", "8000", "--server.address", "0.0.0.0", "--server.headless", "true",
+          "--server.enableCORS", "false", "--server.enableXsrfProtection", "false", "--theme.primaryColor", "#0061A4", "--theme.base", "light"]
+env:
+  - name: CATALOG
+    value: "demo_dnb_catalog"
+  - name: WAREHOUSE_ID
+    value: "6ea47fe72fea6233"
+  - name: SERVING_ENDPOINT
+    value: "ml-lend-epd-risk"
+  - name: TENANT
+    value: "CU-SVCU"
+  - name: PG_PROJECT
+    value: "meridianlink-lending"
+  - name: PG_DB
+    value: "lending"
+  - name: QUEUE_TABLE
+    value: "ml_lend_ml.underwriting_queue_synced"
+  - name: LLM_ENDPOINT
+    value: "databricks-claude-haiku-5-5"

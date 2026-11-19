@@ -1,0 +1,287 @@
+{
+ "version": 2,
+ "instructions": {
+  "text_instructions": [
+   {
+    "id": "70f580e518dc45f1a72c30b72307fb90",
+    "content": [
+     "ROLE: You support credit-union lending executives (e.g. Priya, VP Lending at Summit Valley CU) and MeridianLink product leaders.\n\nPREFER THE METRIC VIEWS: mv_loan_funnel (applications, approvals, pull-through, funded amount, NII), mv_decision_speed (auto-decision rate, time to decision, 24-hour cliff, AI mismatches) and mv_portfolio_risk (early payment default, expected loss). Query them with MEASURE(<measure>) and GROUP BY dimensions. Use fact tables only for row-level detail.\n\nKEY RULES:\n- Do NOT apply a default 30-day window. Unless the user gives a time range, use ALL data and split by period (BEFORE / AFTER).\n- cohort: PILOT = Summit Valley CU + Harbor Point CU (live on Lending Intelligence from 2025-11-01). CONTROL = Riverside Community CU + Prairie Federal CU (legacy rules engine + manual underwriting). period: BEFORE = submitted before 2025-11-01, AFTER = on/after.\n- 'Impact', 'lift' or 'did it work' = difference-in-differences: (PILOT AFTER - PILOT BEFORE) - (CONTROL AFTER - CONTROL BEFORE). Always show all four cells.\n- Pull-through rate = funded loans / approved applications. Approval rate = approved / all applications.\n- Early payment default (EPD) = 60+ days past due within the first 6 installments; compute only on seasoned loans (is_seasoned = TRUE). Use mv_portfolio_risk.epd_rate.\n- Dollar value: first-year net interest income = funded amount x 3.5%; expected loss on EPD = outstanding principal x 55%; underwriter time = 45 min per manual file (20 min when AI-assisted) at $48/hour. These assumptions live in ml_lend_gold.roi_assumptions \u2014 cite them when you show dollars.\n- decision_engine: LEGACY_RULES, LENDING_INTELLIGENCE (EPD model + AI document verification), UNDERWRITER (manual).\n- AI income mismatch = stated income more than 20% above the income AI extracted from the member's pay stub (ai_income_mismatch_flag).\n- Never return SSN, date of birth, email, phone or street address. Member-level PII is masked by policy for analysts.\n- Format rates as percentages with one decimal, money in USD with no decimals, time to decision in minutes if < 120 else hours.\n- Keep answers short: lead with the headline number, then a compact table."
+    ]
+   }
+  ],
+  "join_specs": [
+   {
+    "left": {
+     "identifier": "demo_dnb_catalog.ml_lend_gold.fact_application",
+     "alias": "fact_application"
+    },
+    "right": {
+     "identifier": "demo_dnb_catalog.ml_lend_gold.dim_product",
+     "alias": "dim_product"
+    },
+    "sql": [
+     "`fact_application`.`product_code` = `dim_product`.`product_code`",
+     "--rt=FROM_RELATIONSHIP_TYPE_MANY_TO_ONE--"
+    ],
+    "id": "259c6e616e8848feb55cca7b7c245034"
+   },
+   {
+    "left": {
+     "identifier": "demo_dnb_catalog.ml_lend_gold.fact_application",
+     "alias": "fact_application"
+    },
+    "right": {
+     "identifier": "demo_dnb_catalog.ml_lend_gold.dim_denial_reason",
+     "alias": "dim_denial_reason"
+    },
+    "sql": [
+     "`fact_application`.`denial_reason_id` = `dim_denial_reason`.`denial_reason_id`",
+     "--rt=FROM_RELATIONSHIP_TYPE_MANY_TO_ONE--"
+    ],
+    "id": "5b95ebc67d9a41b881689279f0a1d6cf"
+   },
+   {
+    "left": {
+     "identifier": "demo_dnb_catalog.ml_lend_gold.fact_loan_performance",
+     "alias": "fact_loan_performance"
+    },
+    "right": {
+     "identifier": "demo_dnb_catalog.ml_lend_gold.fact_application",
+     "alias": "fact_application"
+    },
+    "sql": [
+     "`fact_loan_performance`.`application_id` = `fact_application`.`application_id`",
+     "--rt=FROM_RELATIONSHIP_TYPE_ONE_TO_ONE--"
+    ],
+    "id": "5fbe07663d9c4b27ad72db982770a48d"
+   },
+   {
+    "left": {
+     "identifier": "demo_dnb_catalog.ml_lend_gold.fact_application",
+     "alias": "fact_application"
+    },
+    "right": {
+     "identifier": "demo_dnb_catalog.ml_lend_gold.dim_institution",
+     "alias": "dim_institution"
+    },
+    "sql": [
+     "`fact_application`.`institution_id` = `dim_institution`.`institution_id`",
+     "--rt=FROM_RELATIONSHIP_TYPE_MANY_TO_ONE--"
+    ],
+    "id": "d0c51ee4ce9148618786cf4cce597f86"
+   },
+   {
+    "left": {
+     "identifier": "demo_dnb_catalog.ml_lend_ml.application_risk_scores",
+     "alias": "application_risk_scores"
+    },
+    "right": {
+     "identifier": "demo_dnb_catalog.ml_lend_gold.fact_application",
+     "alias": "fact_application"
+    },
+    "sql": [
+     "`application_risk_scores`.`application_id` = `fact_application`.`application_id`",
+     "--rt=FROM_RELATIONSHIP_TYPE_ONE_TO_ONE--"
+    ],
+    "id": "d6f18c5245ab49e98a743e406f5197d6"
+   },
+   {
+    "left": {
+     "identifier": "demo_dnb_catalog.ml_lend_gold.member_notes_enriched",
+     "alias": "member_notes_enriched"
+    },
+    "right": {
+     "identifier": "demo_dnb_catalog.ml_lend_gold.fact_application",
+     "alias": "fact_application"
+    },
+    "sql": [
+     "`member_notes_enriched`.`application_id` = `fact_application`.`application_id`",
+     "--rt=FROM_RELATIONSHIP_TYPE_MANY_TO_ONE--"
+    ],
+    "id": "f79c5b54f7af4217b9d720c421b19a5f"
+   }
+  ],
+  "example_question_sqls": [
+   {
+    "id": "031bd28b88e74c1ebcf3c47b2022ea09",
+    "question": [
+     "What happened to early payment defaults after go-live?"
+    ],
+    "sql": [
+     "SELECT cohort, period, MEASURE(seasoned_loans) AS seasoned_loans, MEASURE(epd_loans) AS epd_loans, ROUND(MEASURE(epd_rate), 4) AS epd_rate,\n",
+     "  ROUND(MEASURE(est_loss_on_epd), 0) AS est_loss_on_epd FROM demo_dnb_catalog.ml_lend_semantic.mv_portfolio_risk GROUP BY cohort, period ORDER BY cohort DESC, period DESC"
+    ]
+   },
+   {
+    "id": "045255445a0d436b904b41f05039bc4e",
+    "question": [
+     "Monthly pull-through trend pilot vs control"
+    ],
+    "sql": [
+     "SELECT submitted_month, cohort, ROUND(MEASURE(pull_through_rate), 4) AS pull_through_rate, MEASURE(applications) AS applications\n",
+     "FROM demo_dnb_catalog.ml_lend_semantic.mv_loan_funnel GROUP BY submitted_month, cohort ORDER BY submitted_month, cohort"
+    ]
+   },
+   {
+    "id": "2f3e28351a4741bc9c660e09f7ec7eea",
+    "question": [
+     "How fast are we deciding loans and how many are automated, pilot vs control?"
+    ],
+    "sql": [
+     "SELECT cohort, period, ROUND(MEASURE(auto_decision_rate), 4) AS auto_decision_rate, MEASURE(median_decision_minutes) AS median_minutes,\n",
+     "  ROUND(MEASURE(p90_decision_hours), 1) AS p90_hours, ROUND(MEASURE(decided_within_24h_rate), 4) AS within_24h\n",
+     "FROM demo_dnb_catalog.ml_lend_semantic.mv_decision_speed GROUP BY cohort, period ORDER BY cohort DESC, period DESC"
+    ]
+   },
+   {
+    "id": "376000c58e744483a8d900faba7a73e6",
+    "question": [
+     "Top denial reasons after go-live by cohort"
+    ],
+    "sql": [
+     "SELECT f.cohort, r.reason_code, r.reason_description, COUNT(*) AS declines\n",
+     "FROM demo_dnb_catalog.ml_lend_gold.fact_application f JOIN demo_dnb_catalog.ml_lend_gold.dim_denial_reason r ON f.denial_reason_id = r.denial_reason_id\n",
+     "WHERE f.is_declined AND f.period = 'AFTER' GROUP BY ALL ORDER BY f.cohort, declines DESC"
+    ]
+   },
+   {
+    "id": "786629af3e4d442e8f18d1d920045b99",
+    "question": [
+     "What are members and loan officers writing about in notes recently?"
+    ],
+    "sql": [
+     "SELECT note_category, cohort, COUNT(*) AS notes FROM demo_dnb_catalog.ml_lend_gold.member_notes_enriched WHERE note_category IS NOT NULL GROUP BY ALL ORDER BY notes DESC"
+    ]
+   },
+   {
+    "id": "9c9f245a098446cbb34065bf9a8fa9c0",
+    "question": [
+     "How many stated-income mismatches did AI catch by month?"
+    ],
+    "sql": [
+     "SELECT submitted_month, MEASURE(documents_ai_verified) AS documents_verified, MEASURE(ai_income_mismatches) AS mismatches\n",
+     "FROM demo_dnb_catalog.ml_lend_semantic.mv_decision_speed WHERE cohort = 'PILOT' GROUP BY submitted_month HAVING MEASURE(documents_ai_verified) > 0 ORDER BY submitted_month"
+    ]
+   },
+   {
+    "id": "a77e8a0f5f754e8799ad0c8d8fa9b13e",
+    "question": [
+     "Funded volume and first-year interest income by credit union after go-live"
+    ],
+    "sql": [
+     "SELECT credit_union, cohort, MEASURE(funded_loans) AS funded_loans, ROUND(MEASURE(funded_amount), 0) AS funded_amount,\n",
+     "  ROUND(MEASURE(est_first_year_interest_income), 0) AS first_year_nii FROM demo_dnb_catalog.ml_lend_semantic.mv_loan_funnel WHERE period = 'AFTER' GROUP BY ALL ORDER BY funded_amount DESC"
+    ]
+   },
+   {
+    "id": "debd4a66d69f4f388394fc684ca47c9d",
+    "question": [
+     "Did Lending Intelligence improve pull-through? Show the difference-in-differences"
+    ],
+    "sql": [
+     "SELECT cohort, period, MEASURE(applications) AS applications, MEASURE(approved_applications) AS approved, MEASURE(funded_loans) AS funded,\n",
+     "  ROUND(MEASURE(pull_through_rate), 4) AS pull_through_rate\n",
+     "FROM demo_dnb_catalog.ml_lend_semantic.mv_loan_funnel GROUP BY cohort, period ORDER BY cohort DESC, period DESC"
+    ]
+   },
+   {
+    "id": "ef28fd0ae7c94c6b9b55362ff781b2cb",
+    "question": [
+     "How many declines turned into funded loans?"
+    ],
+    "sql": [
+     "SELECT cohort, period, MEASURE(declined_applications) AS declines, MEASURE(reapplications_funded) AS declines_turned_into_funded_loans\n",
+     "FROM demo_dnb_catalog.ml_lend_semantic.mv_loan_funnel GROUP BY cohort, period ORDER BY cohort DESC, period DESC"
+    ]
+   },
+   {
+    "id": "fa32080c307a4bdf85342f93899001a7",
+    "question": [
+     "Show the 24-hour cliff: pull-through by time to decision"
+    ],
+    "sql": [
+     "SELECT CASE WHEN decision_minutes <= 60 THEN '1 \u00b7 under 1 hour' WHEN decision_minutes <= 240 THEN '2 \u00b7 1-4 hours' WHEN decision_minutes <= 1440 THEN '3 \u00b7 4-24 hours' ELSE '4 \u00b7 over 24 hours' END AS decision_time_bucket,\n",
+     "  COUNT(*) AS approved, ROUND(AVG(CASE WHEN is_funded THEN 1.0 ELSE 0 END), 4) AS pull_through_rate\n",
+     "FROM demo_dnb_catalog.ml_lend_gold.fact_application WHERE is_approved GROUP BY 1 ORDER BY 1"
+    ]
+   }
+  ]
+ },
+ "data_sources": {
+  "tables": [
+   {
+    "identifier": "demo_dnb_catalog.ml_lend_gold.dim_denial_reason"
+   },
+   {
+    "identifier": "demo_dnb_catalog.ml_lend_gold.dim_institution"
+   },
+   {
+    "identifier": "demo_dnb_catalog.ml_lend_gold.dim_product"
+   },
+   {
+    "identifier": "demo_dnb_catalog.ml_lend_gold.fact_application"
+   },
+   {
+    "identifier": "demo_dnb_catalog.ml_lend_gold.fact_loan_performance"
+   },
+   {
+    "identifier": "demo_dnb_catalog.ml_lend_gold.member_notes_enriched"
+   },
+   {
+    "identifier": "demo_dnb_catalog.ml_lend_gold.roi_assumptions"
+   },
+   {
+    "identifier": "demo_dnb_catalog.ml_lend_ml.application_risk_scores"
+   },
+   {
+    "identifier": "demo_dnb_catalog.ml_lend_semantic.mv_decision_speed"
+   },
+   {
+    "identifier": "demo_dnb_catalog.ml_lend_semantic.mv_loan_funnel"
+   },
+   {
+    "identifier": "demo_dnb_catalog.ml_lend_semantic.mv_portfolio_risk"
+   }
+  ]
+ },
+ "config": {
+  "sample_questions": [
+   {
+    "id": "227a9ef5a9a844c7ae7830fc6089826f",
+    "question": [
+     "Show the 24-hour cliff: pull-through by time to decision"
+    ]
+   },
+   {
+    "id": "3af71d726dce4a54ab22020ee3a87638",
+    "question": [
+     "How has median time to decision changed for Summit Valley CU?"
+    ]
+   },
+   {
+    "id": "583794e2390e4387a53160dd4e285f71",
+    "question": [
+     "Why did auto loans through dealers fund more after go-live?"
+    ]
+   },
+   {
+    "id": "9ebe758031f44966a5765f6a4c19524d",
+    "question": [
+     "How many stated-income mismatches did AI catch last month?"
+    ]
+   },
+   {
+    "id": "a3cc48db15d14574b89a2370ff55ab93",
+    "question": [
+     "Did Lending Intelligence improve pull-through? Compare pilot vs control before and after go-live"
+    ]
+   },
+   {
+    "id": "f64671d5f01c4f1f9b5e0e5876b0c605",
+    "question": [
+     "What happened to early payment defaults after go-live?"
+    ]
+   }
+  ]
+ }
+}
